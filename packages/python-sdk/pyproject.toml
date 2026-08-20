@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentlens"
+version = "0.2.0"
+description = "AgentLens SDK for instrumenting and evaluating AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.28.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentlens*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The SDK has no async tests, but it is usually run from the API's virtualenv
+# where pytest-asyncio is installed and warns when this is unset.
+asyncio_default_fixture_loop_scope = "function"
