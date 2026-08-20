@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Standalone is for Docker / self-hosting. On Vercel it breaks Next 16.3+
-  // (ENOENT next-server.js.nft.json) because the platform adapter skips that file.
-  output: process.env.VERCEL ? undefined : "standalone",
+  // Only for Docker (`OUTPUT_STANDALONE=1`). Leaving this on breaks Vercel on
+  // Next.js 16.3+ (ENOENT next-server.js.nft.json).
+  ...(process.env.OUTPUT_STANDALONE === "1" ? { output: "standalone" as const } : {}),
 };
 
 export default nextConfig;
