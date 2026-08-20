@@ -1,5 +1,7 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const API_PREFIX = "/api/v1";
+/** Free-tier hosts (Render) can take a while to wake; fail with a clear message instead of hanging forever. */
+const DEFAULT_TIMEOUT_MS = 45_000;
 
 export type ApiError = {
   detail: string | { msg: string; type: string }[];
@@ -28,6 +30,10 @@ async function parseError(response: Response): Promise<string> {
   return response.statusText || "Request failed";
 }
 
+function isLocalApi(): boolean {
+  return /localhost|127\.0\.0\.1/.test(API_URL);
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -39,25 +45,48 @@ export async function apiFetch<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_URL}${API_PREFIX}${path}`, {
-    ...options,
-    headers,
-  }).catch(() => {
+  const timeoutMs = DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  if (options.signal) {
+    options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  try {
+    const response = await fetch(`${API_URL}${API_PREFIX}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new ApiClientError(await parseError(response), response.status);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof ApiClientError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiClientError(
+        isLocalApi()
+          ? `Cannot reach the API at ${API_URL}. Start it with uvicorn on port 8000.`
+          : "The API is waking up (free host). Wait ~30s, open the API health URL once, then try again.",
+        0,
+      );
+    }
     throw new ApiClientError(
-      `Cannot reach the API at ${API_URL}. Start it with uvicorn on port 8000.`,
+      isLocalApi()
+        ? `Cannot reach the API at ${API_URL}. Start it with uvicorn on port 8000.`
+        : `Cannot reach the API at ${API_URL}. It may be asleep — open ${API_URL}/health then retry.`,
       0,
     );
-  });
-
-  if (!response.ok) {
-    throw new ApiClientError(await parseError(response), response.status);
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return response.json() as Promise<T>;
 }
 
 export type User = {

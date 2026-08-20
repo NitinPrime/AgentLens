@@ -54,6 +54,13 @@ export default function LoginPage() {
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
+            {isSubmitting ? (
+              <Alert>
+                <AlertDescription>
+                  Signing in… the free API host may take up to a minute to wake. Keep this tab open.
+                </AlertDescription>
+              </Alert>
+            ) : null}
             {error ? (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
