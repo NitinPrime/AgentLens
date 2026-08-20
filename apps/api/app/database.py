@@ -18,6 +18,10 @@ if settings.uses_sqlite:
     engine_kwargs["connect_args"] = connect_args
 else:
     engine_kwargs["pool_pre_ping"] = True
+    # Neon requires TLS. connect_args covers cases where the query string is missing.
+    if "ssl=" not in settings.database_url:
+        connect_args["ssl"] = True
+        engine_kwargs["connect_args"] = connect_args
 
 engine = create_async_engine(settings.database_url, **engine_kwargs)
 

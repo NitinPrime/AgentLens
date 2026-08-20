@@ -1,6 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # config.py lives at <api-root>/app/config.py whether we are in the monorepo
@@ -16,6 +18,31 @@ def _env_files() -> tuple[Path, ...]:
         candidates.append(Path(__file__).resolve().parents[3] / ".env")
     candidates.append(_API_ROOT / ".env")
     return tuple(candidates)
+
+
+def normalize_database_url(raw: str) -> str:
+    """Make a Neon / Render DATABASE_URL safe for SQLAlchemy + asyncpg."""
+
+    url = raw.strip().strip('"').strip("'")
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://") and "+asyncpg" not in url:
+        url = "postgresql+asyncpg://" + url[len("postgresql://") :]
+
+    if "+asyncpg" not in url:
+        return url
+
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query = {k: v for k, v in query.items() if k and v != ""}
+    if "sslmode" in query:
+        mode = query.pop("sslmode")
+        if mode and mode.lower() != "disable":
+            query.setdefault("ssl", "require")
+    if "ssl" in query and query["ssl"].lower() in {"true", "1", "yes"}:
+        query["ssl"] = "require"
+
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
 class Settings(BaseSettings):
@@ -57,6 +84,13 @@ class Settings(BaseSettings):
 
     stream_poll_seconds: float = 2.0
     stream_max_seconds: float = 900.0
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _clean_database_url(cls, value: object) -> object:
+        if isinstance(value, str):
+            return normalize_database_url(value)
+        return value
 
     @property
     def cors_origin_list(self) -> list[str]:
