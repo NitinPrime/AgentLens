@@ -1,6 +1,5 @@
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +22,12 @@ def _env_files() -> tuple[Path, ...]:
 def normalize_database_url(raw: str) -> str:
     """Make a Neon / Render DATABASE_URL safe for SQLAlchemy + asyncpg."""
 
+    from sqlalchemy.engine.url import make_url
+
     url = raw.strip().strip('"').strip("'")
+    # Neon UI sometimes copies a psql wrapper: psql 'postgresql://...'
+    if url.lower().startswith("psql "):
+        url = url.split(None, 1)[1].strip().strip('"').strip("'")
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://") :]
     if url.startswith("postgresql://") and "+asyncpg" not in url:
@@ -32,17 +36,15 @@ def normalize_database_url(raw: str) -> str:
     if "+asyncpg" not in url:
         return url
 
-    parsed = urlparse(url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query = {k: v for k, v in query.items() if k and v != ""}
-    if "sslmode" in query:
-        mode = query.pop("sslmode")
-        if mode and mode.lower() != "disable":
-            query.setdefault("ssl", "require")
-    if "ssl" in query and query["ssl"].lower() in {"true", "1", "yes"}:
-        query["ssl"] = "require"
-
-    return urlunparse(parsed._replace(query=urlencode(query)))
+    parsed = make_url(url)
+    if not parsed.host:
+        raise ValueError(
+            "DATABASE_URL is missing a hostname. Paste the Neon URI with no quotes, e.g. "
+            "postgresql+asyncpg://USER:PASSWORD@ep-….neon.tech/neondb"
+        )
+    # Strip SSL query flags; connect_args sets TLS instead (avoids IDNA/query quirks).
+    clean_query = {k: v for k, v in parsed.query.items() if k.lower() not in {"ssl", "sslmode"}}
+    return parsed.set(query=clean_query).render_as_string(hide_password=False)
 
 
 class Settings(BaseSettings):

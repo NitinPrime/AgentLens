@@ -1,12 +1,20 @@
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import get_settings
 
 settings = get_settings()
+
+
+def _engine_url() -> str:
+    url = make_url(settings.database_url)
+    query = {k: v for k, v in url.query.items() if k.lower() not in {"ssl", "sslmode"}}
+    return url.set(query=query).render_as_string(hide_password=False)
+
 
 connect_args: dict[str, object] = {}
 engine_kwargs: dict[str, object] = {
@@ -18,12 +26,11 @@ if settings.uses_sqlite:
     engine_kwargs["connect_args"] = connect_args
 else:
     engine_kwargs["pool_pre_ping"] = True
-    # Neon requires TLS. connect_args covers cases where the query string is missing.
-    if "ssl=" not in settings.database_url:
-        connect_args["ssl"] = True
-        engine_kwargs["connect_args"] = connect_args
+    # Neon requires TLS. Keep it out of the URL so asyncpg never sees odd query flags.
+    connect_args["ssl"] = True
+    engine_kwargs["connect_args"] = connect_args
 
-engine = create_async_engine(settings.database_url, **engine_kwargs)
+engine = create_async_engine(_engine_url(), **engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
