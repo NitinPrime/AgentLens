@@ -3,13 +3,24 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# config.py lives at <api-root>/app/config.py whether we are in the monorepo
+# (…/AgentLens/apps/api/app/…) or a Docker image (…/app/app/…). Never index past
+# the filesystem root — that blew up on Render with IndexError: 3.
 _API_ROOT = Path(__file__).resolve().parents[1]
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _env_files() -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    # Local monorepo: apps/api/../../.env
+    if len(Path(__file__).resolve().parents) > 3:
+        candidates.append(Path(__file__).resolve().parents[3] / ".env")
+    candidates.append(_API_ROOT / ".env")
+    return tuple(candidates)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(_REPO_ROOT / ".env", _API_ROOT / ".env"),
+        env_file=_env_files(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
