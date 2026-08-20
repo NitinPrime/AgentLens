@@ -1,61 +1,97 @@
 # AgentLens
 
-**Understand what your AI agents actually do.**
+**Observability for AI agents** — Datadog / Sentry for LLM workflows.
 
-AgentLens is an observability, debugging, evaluation, and monitoring platform for
-applications built with AI agents and LLM workflows — think Datadog / Sentry /
-PostHog, but specifically for AI agents.
+Your agent sends traces through a Python SDK. AgentLens shows the full execution tree, cost and latency per model call, live traffic, golden-dataset evaluations, and pass/fail checks when you ship a new version.
 
-Your agent sends traces through the SDK. AgentLens gives you the execution tree,
-the cost and latency of every model call, dashboards over the whole fleet, scored
-evaluations against golden datasets, and a regression check between two versions.
+```text
+Your agent ──SDK──▶ AgentLens API ──▶ Dashboard
+                    traces · cost · evals · versions
+```
 
-## What it does
+---
 
-| Capability | Where |
-|-----------|-------|
-| Trace every agent run: spans, LLM calls, tool calls, events, errors | `/traces` |
-| Waterfall explorer with input/output, tokens, and cost per span | `/traces/[id]` |
-| Live feed over server-sent events as runs are ingested | `/traces` |
-| KPIs and charts: runs, success rate, latency, tokens, cost, model mix | `/dashboard` |
-| Datasets, twelve evaluator types, and an LLM judge | `/evaluations` |
-| Run comparison with the exact checks that flipped to failing | `/evaluations/[id]` |
-| Version rollups and pass/warn/fail regression verdicts | `/versions` |
-| Its own request metrics, stream stats, and workspace usage | `/settings` |
+## Why it exists
 
-## Try it in five minutes
+AI agents fail in ways normal apps do not: a tool times out, a prompt regresses, a new model gets slower and more expensive. AgentLens records every run end-to-end so you can **debug**, **monitor**, and **catch quality drops** before users do.
 
-Two commands. The first writes a local `.env`, installs dependencies, starts the
-API and the web app in their own terminals, and waits until the API answers. The
-second fills it with a week of believable traffic.
+| Without AgentLens | With AgentLens |
+|-------------------|----------------|
+| You only see the final reply | You see every span, tool call, and LLM call |
+| “It feels worse after deploy” | Version comparison with a pass / warn / fail verdict |
+| Manual spot checks | Golden datasets + CI quality gates |
+
+---
+
+## Features
+
+- **Tracing** — spans, LLM calls, tool calls, events, and errors in a waterfall explorer
+- **Live feed** — server-sent events; new runs appear as they are ingested
+- **Analytics** — runs, success rate, latency, tokens, cost, and model mix
+- **Evaluations** — datasets, 12 evaluator types, optional LLM-as-judge
+- **Regression checks** — compare agent / prompt / model versions
+- **Python SDK** — context managers, `@observe`, `evaluate()`, CI `require_pass_rate`
+- **Self-observability** — request metrics, Prometheus export, workspace usage
+
+---
+
+## Quick start (local demo)
+
+**Prerequisites:** Node.js 22+, Python 3.10+
+
+### Windows
 
 ```powershell
-Set-Location E:\AgentLens
+git clone https://github.com/NitinPrime/AgentLens.git
+cd AgentLens
 .\scripts\dev.ps1
 .\apps\api\.venv\Scripts\python.exe scripts\seed_demo.py
 ```
 
+### macOS / Linux
+
 ```bash
+git clone https://github.com/NitinPrime/AgentLens.git
+cd AgentLens
+cp .env.example .env
+# set DATABASE_URL=sqlite+aiosqlite:///./agentlens.db and REDIS_URL=memory://
+cd apps/api && python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# in another terminal:
+cd apps/web && npm install && npm run dev
+# then from repo root:
 python scripts/seed_demo.py
 ```
 
-The seeder creates a demo account, a week of traces across two agent versions
-where the newer one regresses, six evaluators, a golden dataset, and four
-evaluation runs. It prints the login and an API key when it finishes. Nothing
-calls a model provider, so no provider key is needed.
+Open **http://localhost:3000**
 
-Sign in at http://localhost:3000 with `demo@agentlens.dev` / `DemoPassword123!`,
-then drive it live:
+| | |
+|--|--|
+| Email | `demo@agentlens.dev` |
+| Password | `DemoPassword123!` |
+
+What to click:
+
+1. **Dashboard** — fleet KPIs and charts  
+2. **Traces** — open a run, explore the waterfall  
+3. **Evaluations** — baseline vs regressed golden run  
+4. **Versions** — `v1.5.0` vs `v1.4.0` (quality drop)
+
+### Live traffic (optional)
 
 ```powershell
-$env:AGENTLENS_API_KEY = "al_..."     # printed by the seeder
-python examples\support_agent.py --runs 12    # watch /traces update live
-python examples\evaluate_agent.py --degrade   # a CI quality gate failing
+$env:AGENTLENS_API_KEY = "al_..."   # printed by the seeder
+$env:AGENTLENS_API_URL = "http://localhost:8000"
+python examples\support_agent.py --runs 12
+python examples\evaluate_agent.py --degrade
 ```
 
-Full walkthrough: [docs/demo.md](docs/demo.md).
+Keep **Traces** open while the support agent runs — rows appear live.
 
-## Instrument your own agent
+---
+
+## Instrument an agent
 
 ```python
 from agentlens import AgentLens
@@ -83,7 +119,7 @@ with lens.trace(
     trace.set_output(reply)
 ```
 
-Or wrap an existing entry point:
+Or wrap an existing function:
 
 ```python
 @lens.observe(agent_name="support-agent", agent_version="v1.5.0")
@@ -91,176 +127,100 @@ def answer(question: str) -> str:
     return my_agent.run(question)
 ```
 
-Then gate your deploys on quality:
+Gate deploys in CI:
 
 ```python
 lens.evaluate("support-golden", answer).require_pass_rate(0.9)
 ```
 
-Cost is estimated server-side from the model and token counts, so you never send
-money amounts. Ids are client-generated and writes are idempotent, so a run can be
-opened as `running` and completed later. See [docs/sdk.md](docs/sdk.md).
+More: [docs/sdk.md](docs/sdk.md)
 
-## Tech stack
+---
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js 16, TypeScript, Tailwind CSS, shadcn/ui, TanStack Query, Recharts |
-| Backend | FastAPI, Pydantic v2, SQLAlchemy 2.0 async, Alembic |
-| Database | PostgreSQL (SQLite for local development) |
-| Cache / tokens | Redis (in-process fallback for local development) |
-| SDK | Python, `httpx` only |
+## Architecture
 
-## Project structure
+| Layer | Stack |
+|-------|--------|
+| Dashboard | Next.js 16, TypeScript, Tailwind, shadcn/ui, TanStack Query, Recharts |
+| API | FastAPI, Pydantic v2, SQLAlchemy 2.0 async, Alembic |
+| Database | PostgreSQL in production · SQLite for local demo |
+| Tokens | Redis in production · in-process store locally (`memory://`) |
+| SDK | Python · `httpx` only |
 
 ```text
 agentlens/
 ├── apps/
-│   ├── web/          # Next.js dashboard and landing page
-│   └── api/          # FastAPI backend, Alembic migrations, tests
-├── packages/
-│   └── python-sdk/   # agentlens SDK and its tests
-├── workers/          # Background worker
-├── examples/         # Runnable demo agents
-├── scripts/          # dev.ps1, generate-secret.ps1, seed_demo.py
-├── docs/             # Architecture, API, SDK, evaluations, versions, demo, deployment
-├── .github/          # CI workflow and issue templates
+│   ├── web/           # Dashboard + landing page
+│   └── api/           # FastAPI + migrations + tests
+├── packages/python-sdk/
+├── examples/          # Demo agents
+├── scripts/           # seed_demo.py, dev.ps1
+├── docs/
 └── docker-compose.yml
 ```
 
-## Setup
+Auth: JWT for the dashboard, `al_…` API keys for the SDK. Every row is scoped by project so tenants stay isolated.
 
-### Prerequisites
-
-- Node.js 22+
-- Python 3.10+ (3.12 recommended)
-- Docker Desktop (optional — only for the full Postgres/Redis stack)
-
-### Windows (PowerShell)
-
-PowerShell does **not** accept `&&`. Run commands on separate lines, or use `;`.
-
-Generate a JWT secret without OpenSSL:
-
-```powershell
-.\scripts\generate-secret.ps1
-```
-
-Copy `.env.example` to `.env` and set `JWT_SECRET_KEY` to that value. Without
-Docker, keep the local defaults:
-
-```
-DATABASE_URL=sqlite+aiosqlite:///./agentlens.db
-REDIS_URL=memory://
-```
-
-Start both services:
-
-```powershell
-Set-Location E:\AgentLens
-.\scripts\dev.ps1
-```
-
-Or run each one yourself:
-
-```powershell
-Set-Location E:\AgentLens\apps\api
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-```powershell
-Set-Location E:\AgentLens\apps\web
-npm run dev
-```
-
-- Web: http://localhost:3000
-- API docs: http://localhost:8000/docs
-
-### Docker Compose
-
-```bash
-cp .env.example .env
-docker compose up postgres redis api worker -d
-```
-
-Full stack: `docker compose up --build`.
+---
 
 ## Tests
 
-Backend (72 tests). The suite pins its own SQLite database and in-process token
-store, so it does not need Postgres, Redis, or a `.env`:
+| Suite | Count | Command |
+|-------|------:|---------|
+| API | 72 | `cd apps/api && pytest` |
+| SDK | 16 | `cd packages/python-sdk && pytest` |
+| Web | — | `cd apps/web && npm run lint && npm run build` |
 
-```powershell
-Set-Location E:\AgentLens\apps\api
-python -m venv .venv
-.\.venv\Scripts\pip.exe install -r requirements.txt
-.\.venv\Scripts\pytest.exe -q
-```
+API tests use an in-memory SQLite DB — no Postgres, Redis, or `.env` required.
 
-```bash
-cd apps/api
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pytest
-```
+CI runs on every push via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-SDK (16 tests, no server needed — the API is faked):
-
-```powershell
-Set-Location E:\AgentLens\packages\python-sdk
-..\..\apps\api\.venv\Scripts\pytest.exe -q
-```
-
-Frontend:
-
-```powershell
-Set-Location E:\AgentLens\apps\web
-npm run lint
-npm run build
-```
-
-## Roadmap
-
-- [x] Phase 1: Monorepo, Docker, auth
-- [x] Phase 2: Organizations, projects, API keys
-- [x] Phase 3: Trace ingestion, SDK
-- [x] Phase 4: Trace explorer UI
-- [x] Phase 5: Analytics dashboard
-- [x] Phase 6: Evaluations & LLM-as-judge
-- [x] Phase 7: Regression testing & versions
-- [x] Phase 8: Demo agents & seeded demo
-- [x] Phase 9: Real-time updates & self-observability
-- [x] Phase 10: Testing, security, docs, deployment polish
-
-## Known limits
-
-Deliberate trade-offs, documented rather than hidden:
-
-- **Evaluation runs execute inline** in the HTTP request. Large datasets with an
-  LLM judge hold the connection open; shard sweeps beyond a few hundred items.
-- **The live event bus and metrics registry are per-process.** Multiple API workers
-  need Redis pub/sub for the stream and Prometheus for aggregation. See
-  [docs/deployment.md](docs/deployment.md#scaling-notes).
-- **The rate limiter keys on client IP**, so behind a proxy it applies to the
-  proxy. Enforce per-client limits at the edge.
-- **Without `OPENAI_API_KEY` the LLM judge uses an offline heuristic.** Scores are
-  labelled as such and are a smoke test, not a quality bar.
-- **Model prices come from a static table** (`app/core/pricing.py`) and need
-  updating as providers change them.
+---
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — components, data model, request flow, trade-offs
-- [API](docs/api.md) — every endpoint, conventions, status codes
-- [SDK](docs/sdk.md) — tracing, decorators, datasets, evaluations
-- [Evaluations](docs/evaluations.md) — evaluator catalogue, LLM judge, run comparison
-- [Versions](docs/versions.md) — rollups and regression verdicts
-- [Demo](docs/demo.md) — the seeded workspace and example agents
-- [Deployment](docs/deployment.md) — configuration, production checklist, scaling
+| Doc | Contents |
+|-----|----------|
+| [Architecture](docs/architecture.md) | Data model, request flow, trade-offs |
+| [API](docs/api.md) | Endpoints and conventions |
+| [SDK](docs/sdk.md) | Tracing, datasets, evaluations |
+| [Evaluations](docs/evaluations.md) | Evaluator catalogue, LLM judge |
+| [Versions](docs/versions.md) | Rollups and regression verdicts |
+| [Demo](docs/demo.md) | Seeded workspace walkthrough |
+| [Deployment](docs/deployment.md) | Env vars, production checklist |
+
+Interactive API docs when running locally: http://localhost:8000/docs
+
+---
+
+## Deploy (free tier sketch)
+
+For a public portfolio demo:
+
+| Piece | Free option |
+|-------|-------------|
+| Dashboard | [Vercel](https://vercel.com) · root `apps/web` |
+| API | [Render](https://render.com) · root `apps/api` |
+| Database | [Neon](https://neon.tech) Postgres |
+| Redis | `REDIS_URL=memory://` (enough for a demo) |
+
+Set `NEXT_PUBLIC_API_URL` on Vercel to the Render URL, and `CORS_ORIGINS` on the API to the Vercel URL. Free API hosts sleep when idle — first load can take ~30s.
+
+Details: [docs/deployment.md](docs/deployment.md)
+
+---
+
+## Known limits
+
+Deliberate trade-offs, not bugs:
+
+- Evaluation runs execute **inline** in the HTTP request (shard large LLM-judge sweeps)
+- Live event bus and metrics are **per-process** (use Redis pub/sub + Prometheus to scale out)
+- Without `OPENAI_API_KEY`, the LLM judge uses a labelled offline heuristic
+- Model prices come from a static table in `app/core/pricing.py`
+
+---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-#   A g e n t L e n s  
- 
