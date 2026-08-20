@@ -32,7 +32,8 @@ def _migration_url() -> str:
 
     url = make_url(settings.database_url)
     # Drop libpq/asyncpg SSL query flags — we set TLS on the connect args.
-    query = {k: v for k, v in url.query.items() if k.lower() not in {"ssl", "sslmode"}}
+    drop = {"ssl", "sslmode", "channel_binding"}
+    query = {k: v for k, v in url.query.items() if k.lower() not in drop}
     return url.set(query=query).render_as_string(hide_password=False)
 
 

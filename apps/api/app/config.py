@@ -42,8 +42,9 @@ def normalize_database_url(raw: str) -> str:
             "DATABASE_URL is missing a hostname. Paste the Neon URI with no quotes, e.g. "
             "postgresql+asyncpg://USER:PASSWORD@ep-….neon.tech/neondb"
         )
-    # Strip SSL query flags; connect_args sets TLS instead (avoids IDNA/query quirks).
-    clean_query = {k: v for k, v in parsed.query.items() if k.lower() not in {"ssl", "sslmode"}}
+    # Drop flags asyncpg does not accept as connect() kwargs (Neon adds these).
+    drop = {"ssl", "sslmode", "channel_binding"}
+    clean_query = {k: v for k, v in parsed.query.items() if k.lower() not in drop}
     return parsed.set(query=clean_query).render_as_string(hide_password=False)
 
 
